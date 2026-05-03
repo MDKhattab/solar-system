@@ -76,10 +76,19 @@ jobs:
       - name: Configure Kubectl
         run: |
           mkdir -p $HOME/.kube
-          # Use printf to avoid adding extra newlines, and tr -d to remove any hidden spaces/newlines from the secret
-          printf '%s' "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
-          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+          
+          # 1. Decode the secret strictly using printf to avoid extra newlines
+          # 2. tr -d '\n\r ' removes any accidental spaces or newlines from the secret value
+          printf '%s' "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > $HOME/.kube/config
+          
+          # 3. Debug: Show the first 2 lines to verify it looks like YAML
+          echo "--- Verifying Kubeconfig Content ---"
+          head -n 2 $HOME/.kube/config
+          
           chmod 600 $HOME/.kube/config
+          
+          # 4. Test connection
+          kubectl cluster-info
 
       # 2. Deploy using the Image URI from the Build Job
       - name: Deploy to EKS
@@ -107,3 +116,4 @@ jobs:
       # 3. Verify
       - name: Verify Deployment
         run: kubectl rollout status deployment/solar-system --timeout=60s
+        
