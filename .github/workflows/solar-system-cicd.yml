@@ -79,7 +79,7 @@ jobs:
           
           # 1. Decode the secret strictly using printf to avoid extra newlines
           # 2. tr -d '\n\r ' removes any accidental spaces or newlines from the secret value
-          printf '%s' "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > $HOME/.kube/config
+          printf '%s' "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           
           # 3. Debug: Show the first 2 lines to verify it looks like YAML
           echo "--- Verifying Kubeconfig Content ---"
