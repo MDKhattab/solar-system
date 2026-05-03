@@ -76,6 +76,8 @@ jobs:
       - name: Configure Kubectl
         run: |
           mkdir -p $HOME/.kube
+          # Use printf to avoid adding extra newlines, and tr -d to remove any hidden spaces/newlines from the secret
+          printf '%s' "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
           echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
           chmod 600 $HOME/.kube/config
 
@@ -105,4 +107,3 @@ jobs:
       # 3. Verify
       - name: Verify Deployment
         run: kubectl rollout status deployment/solar-system --timeout=60s
-        
