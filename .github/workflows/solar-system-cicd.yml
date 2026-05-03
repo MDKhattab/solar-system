@@ -65,55 +65,43 @@ jobs:
   # JOB 2: DEPLOY TO EKS
   # ---------------------------------------------------------
   deploy:
-    needs: build # ⭐ This ensures deploy only runs if build succeeds
-    runs-on: ubuntu-latest
+     needs: build
+     runs-on: ubuntu-latest
 
-    steps:
+     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. Setup Kubectl
+      # 1. CONFIGURE AWS CREDENTIALS (CRITICAL STEP)
+      # This sets up the environment so the 'aws' command inside kubeconfig works
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 2. Configure Kubectl (Decode Secret)
       - name: Configure Kubectl
         run: |
           mkdir -p $HOME/.kube
-          
-          # 1. Decode the secret strictly using printf to avoid extra newlines
-          # 2. tr -d '\n\r ' removes any accidental spaces or newlines from the secret value
           printf '%s' "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
-          
-          # 3. Debug: Show the first 2 lines to verify it looks like YAML
-          echo "--- Verifying Kubeconfig Content ---"
-          head -n 2 $HOME/.kube/config
-          
           chmod 600 $HOME/.kube/config
           
-          # 4. Test connection
+          # Verify connection now that AWS creds are set
           kubectl cluster-info
 
-      # 2. Deploy using the Image URI from the Build Job
+      # 3. Deploy to EKS
       - name: Deploy to EKS
         run: |
-          # 1. Get the Image URI from the previous job
           IMAGE_URI="${{ needs.build.outputs.ecr-image-uri }}"
-          
-          # 2. Define other variables if needed
-          NAMESPACE="default"
-          REPLICAS="2"
-          HOST_NAME="solar-system.com" # If you have an Ingress
-
-          # 3. Export them so envsubst can see them
           export IMAGE_URI
-          export NAMESPACE
-          export REPLICAS
-          export HOST_NAME
-
-          # 4. Apply all manifests
-          # Note: We use 'kubectl apply -f -' for each to handle them individually
+          export NAMESPACE="default"
+          export REPLICAS="2"
+          
           envsubst < kubernetes/development/deployment.yaml | kubectl apply -f -
           envsubst < kubernetes/development/service.yaml | kubectl apply -f -
           envsubst < kubernetes/development/ingress.yaml | kubectl apply -f -
 
-      # 3. Verify
       - name: Verify Deployment
         run: kubectl rollout status deployment/solar-system --timeout=60s
-        
