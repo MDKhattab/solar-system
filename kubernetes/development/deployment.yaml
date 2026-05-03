@@ -10,20 +10,17 @@ spec:
   selector:
     matchLabels:
       app: solar-system
-  strategy: {}
+  strategy: RollingUpdate
   template:
     metadata:
       labels:
         app: solar-system
     spec:
       containers:
-      - image: ${K8S_IMAGE}
+      - image: ${IMAGE_URI}
         imagePullPolicy: Always
         name: solar-system
         ports:
         - containerPort: 3000
           name: http
           protocol: TCP
-        envFrom:
-        - secretRef:
-            name: mongo-db-creds

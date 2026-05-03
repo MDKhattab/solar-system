@@ -1,0 +1,107 @@
+name: Build & Deploy to EKS (Separated Jobs)
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: solar-system
+  DOCKERHUB_REPO: mokhattab/solar-system # Replace with your username
+  EKS_CLUSTER_NAME: solar-system-cluster
+
+jobs:
+  # ---------------------------------------------------------
+  # JOB 1: BUILD & PUSH IMAGES
+  # ---------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ecr-image-uri: ${{ steps.ecr-push.outputs.ecr-uri }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Build the Image once
+      - name: Build Docker Image
+        run: docker build -t solar-system:${{ github.sha }} .
+
+      # 2. Push to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push to Docker Hub
+        run: |
+          docker tag solar-system:${{ github.sha }} ${{ env.DOCKERHUB_REPO }}:latest
+          docker tag solar-system:${{ github.sha }} ${{ env.DOCKERHUB_REPO }}:${{ github.sha }}
+          docker push ${{ env.DOCKERHUB_REPO }}:latest
+          docker push ${{ env.DOCKERHUB_REPO }}:${{ github.sha }}
+
+      # 3. Push to AWS ECR
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push to ECR
+        id: ecr-push
+        run: |
+          ECR_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
+          docker tag solar-system:${{ github.sha }} $ECR_URI
+          docker push $ECR_URI
+          echo "ecr-uri=$ECR_URI" >> $GITHUB_OUTPUT
+
+  # ---------------------------------------------------------
+  # JOB 2: DEPLOY TO EKS
+  # ---------------------------------------------------------
+  deploy:
+    needs: build # ⭐ This ensures deploy only runs if build succeeds
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Setup Kubectl
+      - name: Configure Kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      # 2. Deploy using the Image URI from the Build Job
+      - name: Deploy to EKS
+        run: |
+          # 1. Get the Image URI from the previous job
+          IMAGE_URI="${{ needs.build.outputs.ecr-image-uri }}"
+          
+          # 2. Define other variables if needed
+          NAMESPACE="default"
+          REPLICAS="2"
+          HOST_NAME="solar-system.com" # If you have an Ingress
+
+          # 3. Export them so envsubst can see them
+          export IMAGE_URI
+          export NAMESPACE
+          export REPLICAS
+          export HOST_NAME
+
+          # 4. Apply all manifests
+          # Note: We use 'kubectl apply -f -' for each to handle them individually
+          envsubst < kubernetes/development/deployment.yaml | kubectl apply -f -
+          envsubst < kubernetes/development/service.yaml | kubectl apply -f -
+          envsubst < kubernetes/development/ingress.yaml | kubectl apply -f -
+
+      # 3. Verify
+      - name: Verify Deployment
+        run: kubectl rollout status deployment/solar-system --timeout=60s
